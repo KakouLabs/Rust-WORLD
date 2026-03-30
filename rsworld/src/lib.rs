@@ -1,8 +1,8 @@
 use rsworld_sys::{
-    CheapTrick, CheapTrickOption, CodeAperiodicity, CodeSpectralEnvelope, D4COption,
-    DecodeAperiodicity, DecodeSpectralEnvelope, Dio, DioOption, GetFFTSizeForCheapTrick,
-    GetNumberOfAperiodicities, GetSamplesForDIO, GetSamplesForHarvest, Harvest, HarvestOption,
-    StoneMask, Synthesis, D4C,
+    CheapTrick, CheapTrickFromSpectrum, CheapTrickOption, CodeAperiodicity, CodeSpectralEnvelope,
+    D4CFromSpectrum, D4COption, DecodeAperiodicity, DecodeSpectralEnvelope, Dio, DioOption,
+    GetFFTSizeForCheapTrick, GetNumberOfAperiodicities, GetSamplesForDIO, GetSamplesForHarvest,
+    Harvest, HarvestOption, StoneMask, Synthesis, D4C,
 };
 
 /// Build a row-pointer array from a flat row-major slice.
@@ -54,6 +54,34 @@ pub fn cheaptrick(
             x_length,
             fs,
             temporal_positions.as_ptr(),
+            f0.as_ptr(),
+            f0_length,
+            option as *const _,
+            spectrogram_ptr,
+        );
+    }
+    spectrogram
+}
+
+pub fn cheaptrick_from_spectrum(
+    power_spectrum: &[f64],
+    fs: i32,
+    f0: &[f64],
+    option: &CheapTrickOption,
+) -> Vec<Vec<f64>> {
+    let f0_length: i32 = f0.len() as i32;
+    let fft_size = option.fft_size;
+    let cols = (fft_size / 2 + 1) as usize;
+    let mut spectrogram = vec![vec![0.0; cols]; f0_length as usize];
+    let mut spectrogram_ptr = spectrogram
+        .iter_mut()
+        .map(|inner| inner.as_mut_ptr())
+        .collect::<Vec<_>>();
+    let spectrogram_ptr = spectrogram_ptr.as_mut_ptr();
+    unsafe {
+        CheapTrickFromSpectrum(
+            power_spectrum.as_ptr(),
+            fs,
             f0.as_ptr(),
             f0_length,
             option as *const _,
@@ -232,6 +260,35 @@ pub fn d4c(
     aperiodicity
 }
 
+pub fn d4c_love_train(
+    power_spectrum: &[f64],
+    fft_size: i32,
+    fs: i32,
+    f0: &[f64],
+    temporal_positions: &[f64],
+) -> Vec<Vec<f64>> {
+    let f0_length = f0.len() as i32;
+    let cols = (fft_size / 2 + 1) as usize;
+    let mut aperiodicity = vec![vec![0.0; cols]; f0_length as usize];
+    let mut aperiodicity_ptr = aperiodicity
+        .iter_mut()
+        .map(|inner| inner.as_mut_ptr())
+        .collect::<Vec<_>>();
+    let aperiodicity_ptr = aperiodicity_ptr.as_mut_ptr();
+    unsafe {
+        D4CFromSpectrum(
+            power_spectrum.as_ptr(),
+            fft_size,
+            fs,
+            f0.as_ptr(),
+            f0_length,
+            temporal_positions.as_ptr(),
+            aperiodicity_ptr,
+        );
+    }
+    aperiodicity
+}
+
 pub fn dio(x: &[f64], fs: i32, option: &DioOption) -> (Vec<f64>, Vec<f64>) {
     let x_length = x.len() as i32;
     let f0_length: usize;
@@ -360,6 +417,31 @@ pub fn cheaptrick_flat(
     out
 }
 
+pub fn cheaptrick_from_spectrum_flat(
+    power_spectrum: &[f64],
+    fs: i32,
+    f0: &[f64],
+    option: &CheapTrickOption,
+) -> Vec<f64> {
+    let f0_length = f0.len() as i32;
+    let fft_size = option.fft_size;
+    let cols = (fft_size / 2 + 1) as usize;
+    let rows = f0_length as usize;
+    let mut out = vec![0.0f64; rows * cols];
+    let mut ptrs = row_ptrs_mut(&mut out, rows, cols);
+    unsafe {
+        CheapTrickFromSpectrum(
+            power_spectrum.as_ptr(),
+            fs,
+            f0.as_ptr(),
+            f0_length,
+            option as *const _,
+            ptrs.as_mut_ptr(),
+        );
+    }
+    out
+}
+
 pub fn d4c_flat(
     x: &[f64],
     fs: i32,
@@ -389,6 +471,32 @@ pub fn d4c_flat(
             fft_size,
             option as *const _,
             ptrs.as_mut_ptr(),
+        );
+    }
+    out
+}
+
+pub fn d4c_love_train_flat(
+    power_spectrum: &[f64],
+    fft_size: i32,
+    fs: i32,
+    f0: &[f64],
+    temporal_positions: &[f64],
+) -> Vec<f64> {
+    let f0_length = f0.len() as i32;
+    let cols = (fft_size / 2 + 1) as usize;
+    let rows = f0_length as usize;
+    let mut out = vec![0.0f64; rows * cols];
+    let mut out_ptrs = row_ptrs_mut(&mut out, rows, cols);
+    unsafe {
+        D4CFromSpectrum(
+            power_spectrum.as_ptr(),
+            fft_size,
+            fs,
+            f0.as_ptr(),
+            f0_length,
+            temporal_positions.as_ptr(),
+            out_ptrs.as_mut_ptr(),
         );
     }
     out
@@ -527,8 +635,7 @@ pub fn synthesis_flat(
 
 #[cfg(test)]
 mod tests {
-    // CheapTrick test
-    use crate::{cheaptrick, CheapTrickOption};
+    use crate::*;
 
     #[test]
     fn test_cheaptrick() {
@@ -542,11 +649,6 @@ mod tests {
         assert_eq!(spectrogram[0].len(), (option.fft_size / 2 + 1) as usize);
     }
 
-    // Codec test
-    use crate::{
-        code_aperiodicity, code_spectral_envelope, decode_aperiodicity, decode_spectral_envelope,
-        get_number_of_aperiodicities,
-    };
 
     #[test]
     fn test_get_number_of_aperiodicities() {
@@ -629,8 +731,6 @@ mod tests {
         assert_eq!(spectrogram[0].len(), (option.fft_size / 2 + 1) as usize);
     }
 
-    // D4C test
-    use crate::{d4c, D4COption};
 
     #[test]
     fn test_d4c() {
@@ -645,8 +745,36 @@ mod tests {
         assert_eq!(aperiodicity[0][0], 0.999999999999);
     }
 
-    // DIO test
-    use crate::{dio, DioOption};
+    #[test]
+    fn test_d4c_love_train() {
+        let fs = 44100;
+        let ct_option = CheapTrickOption::new(fs);
+        let fft_size = ct_option.fft_size;
+        let f0_len = 2;
+        let temporal_positions = vec![0.0, 0.005];
+        let f0 = vec![100.0, 150.0];
+        let cols = (fft_size / 2 + 1) as usize;
+        let power_spectrum = vec![1.0; f0_len * cols];
+        let aperiodicity0 = d4c_love_train(&power_spectrum, fft_size, fs, &f0, &temporal_positions);
+        assert_eq!(aperiodicity0.len(), f0_len);
+        assert_eq!(aperiodicity0[0].len(), cols);
+    }
+
+    #[test]
+    fn test_d4c_love_train_flat() {
+        let fs = 44100;
+        let ct_option = CheapTrickOption::new(fs);
+        let fft_size = ct_option.fft_size;
+        let f0_len = 2;
+        let temporal_positions = vec![0.0, 0.005];
+        let f0 = vec![100.0, 150.0];
+        let cols = (fft_size / 2 + 1) as usize;
+        let power_spectrum = vec![1.0; f0_len * cols];
+        let aperiodicity0 =
+            d4c_love_train_flat(&power_spectrum, fft_size, fs, &f0, &temporal_positions);
+        assert_eq!(aperiodicity0.len(), f0_len * cols);
+    }
+
 
     #[test]
     fn test_dio() {
@@ -658,8 +786,6 @@ mod tests {
         assert_eq!(f0, vec![0.0, 0.0]);
     }
 
-    // Harvest test
-    use crate::{harvest, HarvestOption};
 
     #[test]
     fn test_harvest() {
@@ -671,8 +797,6 @@ mod tests {
         assert_eq!(f0, vec![0.0, 0.0]);
     }
 
-    // StoneMask test
-    use crate::stonemask;
 
     #[test]
     fn test_stonemask() {
@@ -684,8 +808,6 @@ mod tests {
         assert_eq!(refined_f0, vec![0.0, 0.0]);
     }
 
-    // Synthesis test
-    use crate::synthesis;
 
     #[test]
     fn test_synthesis() {
@@ -704,10 +826,6 @@ mod tests {
         assert_eq!(y.len(), y_length as usize);
     }
 
-    use crate::{
-        cheaptrick_flat, code_aperiodicity_flat, code_spectral_envelope_flat, d4c_flat,
-        decode_aperiodicity_flat, decode_spectral_envelope_flat, synthesis_flat,
-    };
 
     #[test]
     fn test_cheaptrick_flat() {

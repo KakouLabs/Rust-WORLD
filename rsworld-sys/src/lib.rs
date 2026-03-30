@@ -33,6 +33,14 @@ extern "C" {
     );
     pub fn InitializeCheapTrickOption(fs: c_int, option: *mut CheapTrickOption);
     pub fn GetFFTSizeForCheapTrick(fs: c_int, option: *mut CheapTrickOption);
+    pub fn CheapTrickFromSpectrum(
+        power_spectrum: *const c_double,
+        fs: c_int,
+        f0: *const c_double,
+        f0_length: c_int,
+        option: *const CheapTrickOption,
+        spectrogram: *mut *mut c_double,
+    );
 }
 
 // Codec
@@ -100,6 +108,15 @@ extern "C" {
         f0_length: c_int,
         fft_size: c_int,
         option: *const D4COption,
+        aperiodicity: *mut *mut c_double,
+    );
+    pub fn D4CFromSpectrum(
+        power_spectrum: *const c_double,
+        fft_size: c_int,
+        fs: c_int,
+        f0: *const c_double,
+        f0_length: c_int,
+        temporal_positions: *const c_double,
         aperiodicity: *mut *mut c_double,
     );
 }
@@ -205,13 +222,13 @@ extern "C" {
 
 #[cfg(test)]
 mod tests {
+    use crate::*;
+
     #[allow(dead_code)]
     fn get_type<T>(_: T) -> &'static str {
         std::any::type_name::<T>()
     }
 
-    // CheapTrick test
-    use crate::{CheapTrick, CheapTrickOption, GetFFTSizeForCheapTrick};
 
     #[test]
     fn test_initialize_cheaptrick_option() {
@@ -274,11 +291,6 @@ mod tests {
         // assert_eq!(spectrogram[0][0], 0.0000000000000000973637408614245);
     }
 
-    // Codec test
-    use crate::{
-        CodeAperiodicity, CodeSpectralEnvelope, DecodeAperiodicity, DecodeSpectralEnvelope,
-        GetNumberOfAperiodicities,
-    };
     #[test]
     fn test_get_number_of_aperiodicities() {
         let fs = 44100;
@@ -501,8 +513,6 @@ mod tests {
         assert_eq!(spectrogram[0].len(), xl);
     }
 
-    // D4C test
-    use crate::{D4COption, D4C};
 
     #[test]
     fn test_initialize_d4c_option() {
@@ -544,8 +554,6 @@ mod tests {
         }
     }
 
-    // Dio test
-    use crate::{Dio, DioOption, GetSamplesForDIO};
 
     #[test]
     fn test_initialize_dio_option() {
@@ -600,8 +608,6 @@ mod tests {
         assert_eq!(f0, vec![0.0, 0.0]);
     }
 
-    // Harvest test
-    use crate::{GetSamplesForHarvest, Harvest, HarvestOption};
 
     #[test]
     fn test_initalize_harvest_option() {
@@ -653,8 +659,6 @@ mod tests {
         assert_eq!(f0, vec![0.0, 0.0]);
     }
 
-    // StoneMask test
-    use crate::StoneMask;
 
     #[test]
     fn test_stonemask() {
@@ -693,8 +697,6 @@ mod tests {
         assert_eq!(refined_f0, vec![0.0, 0.0]);
     }
 
-    // Synthesis test
-    use crate::Synthesis;
 
     #[test]
     fn test_synthesis() {
